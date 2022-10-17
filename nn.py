@@ -1,3 +1,4 @@
+from audioop import reverse
 import sys
 import os
 import numpy as np
@@ -34,7 +35,7 @@ class Net(object):
 			num_layers : Number of HIDDEN layers.
 			num_units : Number of units in each Hidden layer.
 		'''
-		self.num_layers = num_layers
+		self.num_layers = num_layers+1
 		self.num_units = num_units
 
 		self.biases = []
@@ -43,16 +44,16 @@ class Net(object):
 
 			if i==0:
 				# Input layer
-				self.weights.append(np.random.uniform(-1, 1, size=(NUM_FEATS, self.num_units)))
+				self.weights.append(np.array(np.random.uniform(-1, 1, size=(NUM_FEATS, self.num_units)), dtype=np.float128))
 			else:
 				# Hidden layer
-				self.weights.append(np.random.uniform(-1, 1, size=(self.num_units, self.num_units)))
+				self.weights.append(np.array(np.random.uniform(-1, 1, size=(self.num_units, self.num_units)), dtype=np.float128))
 
-			self.biases.append(np.random.uniform(-1, 1, size=(self.num_units, 1)))
+			self.biases.append(np.array(np.random.uniform(-1, 1, size=(self.num_units, 1)), dtype=np.float128))
 
 		# Output layer
-		self.biases.append(np.random.uniform(-1, 1, size=(1, 1)))
-		self.weights.append(np.random.uniform(-1, 1, size=(self.num_units, 1)))
+		self.biases.append(np.array(np.random.uniform(-1, 1, size=(1, 1)), dtype=np.float128))
+		self.weights.append(np.array(np.random.uniform(-1, 1, size=(self.num_units, 1)), dtype=np.float128))
 
 	def __call__(self, X):
 		'''
@@ -69,13 +70,27 @@ class Net(object):
 		----------
 			y : Output of the network, numpy array of shape m x 1
 		'''
+		self.h = []
+		self.a = []
 		h = X
-		for w, b in self.weights, self.biases:
-			h = np.dot(h,w) + b.T
-			h = np.max(h, 0)
-		e_h = np.exp(h)
-		output = e_h / e_h.sum()
-		return output
+		self.h.append(h)
+		# Forward pass in hidden layers
+		for i in range(self.num_layers-1):
+			a = np.dot(h,self.weights[i]) + self.biases[i].T
+			self.a.append(a)
+			h = np.maximum(a,0)
+			self.h.append(h)
+		# Forward pass in last layer
+		a = np.dot(h,self.weights[self.num_layers-1]) + self.biases[self.num_layers-1].T
+		self.a.append(a)
+		self.output = a
+		# for h in self.h:
+		# 	print(h.shape)
+		# print()
+		# for h in self.a:
+		# 	print(h.shape)
+		# print()
+		return self.output
 
 	def backward(self, X, y, lamda):
 		'''
@@ -95,8 +110,29 @@ class Net(object):
 
 		Hint: You need to do a forward pass before performing backward pass.
 		'''
-		raise NotImplementedError
+		y = np.reshape(y,(y.shape[0], 1))
+		del_b = []
+		del_W = []
+		m = X.shape[0]
+		del_a = -2/m * (y - self.output)
 
+		for i in range(self.num_layers-1, -1,-1):
+			d_W = np.dot(self.h[i].T, del_a)
+			d_b = np.reshape(np.sum(del_a, axis=0), (del_a.shape[1],1))
+			del_W.append(d_W)
+			del_b.append(d_b)
+
+			del_h = np.dot(del_a, self.weights[i].T)
+
+			del_activation = (self.a[i-1].T > 0) * 1
+			del_a = np.multiply(del_h, del_activation.T)
+
+			
+			
+		del_W.reverse()
+		del_b.reverse()
+		return del_W, del_b
+		
 
 class Optimizer(object):
 	'''
@@ -124,7 +160,11 @@ class Optimizer(object):
 			delta_weights: Gradients of weights with respect to loss.
 			delta_biases: Gradients of biases with respect to loss.
 		'''
-		raise NotImplementedError
+		L = len(weights)
+		for i in range(L):
+			weights[i] = weights[i] - self.learning_rate * delta_weights[i]
+			biases[i] = biases[i] - self.learning_rate * delta_biases[i]
+		return weights, biases
 
 
 def loss_mse(y, y_hat):
@@ -140,7 +180,8 @@ def loss_mse(y, y_hat):
 	----------
 		MSE loss between y and y_hat.
 	'''
-	raise NotImplementedError
+	m = y.shape[0]
+	return 1/m * np.sum((y-y_hat)**2)
 
 def loss_regularization(weights, biases):
 	'''
@@ -154,7 +195,16 @@ def loss_regularization(weights, biases):
 	----------
 		l2 regularization loss 
 	'''
-	raise NotImplementedError
+	sum = 0.0
+	for w, b in zip(weights, biases):
+		for row in w:
+			for column in row:
+				sum += column
+		for row in b:
+			for column in row:
+				sum += column
+
+	return sum
 
 def loss_fn(y, y_hat, weights, biases, lamda):
 	'''
@@ -171,7 +221,8 @@ def loss_fn(y, y_hat, weights, biases, lamda):
 	----------
 		l2 regularization loss 
 	'''
-	raise NotImplementedError
+	lamda = 0
+	return loss_mse(y,y_hat) + lamda * loss_regularization(weights, biases)
 
 def rmse(y, y_hat):
 	'''
@@ -186,7 +237,9 @@ def rmse(y, y_hat):
 	----------
 		RMSE between y and y_hat.
 	'''
-	raise NotImplementedError
+	m = y.shape[0]
+	
+	return 1/m * np.sqrt(np.sum((y-y_hat)**2))
 
 def cross_entropy_loss(y, y_hat):
 	'''
@@ -229,7 +282,6 @@ def train(
 			batch_input = train_input[i:i+batch_size]
 			batch_target = train_target[i:i+batch_size]
 			pred = net(batch_input)
-
 			# Compute gradients of loss w.r.t. weights and biases
 			dW, db = net.backward(batch_input, batch_target, lamda)
 
@@ -244,9 +296,9 @@ def train(
 			batch_loss = loss_fn(batch_target, pred, net.weights, net.biases, lamda)
 			epoch_loss += batch_loss
 
-			#print(e, i, rmse(batch_target, pred), batch_loss)
-
-		#print(e, epoch_loss)
+			# print(e, i, rmse(batch_target, pred), batch_loss)
+		print(net.weights[0][0][0])
+		print(e, epoch_loss)
 
 		# Write any early stopping conditions required (only for Part 2)
 		# Hint: You can also compute dev_rmse here and use it in the early
@@ -284,10 +336,10 @@ def read_data():
 	train= pd.read_csv('regression/data/train.csv')
 	dev = pd.read_csv('regression/data/dev.csv')
 	test = pd.read_csv('regression/data/test.csv')
-	train_input = np.array(train.iloc[:,0:-1])
-	train_target = np.array(train.iloc[:,-1])
-	dev_input = np.array(dev.iloc[:,0:-1])
-	dev_target = np.array(dev.iloc[:,-1])
+	train_input = np.array(train.iloc[:,1:])
+	train_target = np.array(train.iloc[:,0])
+	dev_input = np.array(dev.iloc[:,1:])
+	dev_target = np.array(dev.iloc[:,0])
 	test_input = np.array(test)
 
 	return train_input, train_target, dev_input, dev_target, test_input
@@ -297,9 +349,9 @@ def main():
 
 	# Hyper-parameters 
 	max_epochs = 50
-	batch_size = 256
+	batch_size = 1024
 	learning_rate = 0.001
-	num_layers = 1
+	num_layers = 2
 	num_units = 64
 	lamda = 0.1 # Regularization Parameter
 
@@ -311,7 +363,7 @@ def main():
 		train_input, train_target,
 		dev_input, dev_target
 	)
-	get_test_data_predictions(net, test_input)
+	# get_test_data_predictions(net, test_input)
 
 
 if __name__ == '__main__':
